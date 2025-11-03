@@ -82,10 +82,11 @@ import {
 // Import data
 import { faqData, glossaryData, portalDirectoryData } from './data/knowledgeBase';
 import { getAllTemplates } from './data/templates';
+import PortalExplorer from './components/PortalExplorer';
 
 const RFPWinningAssistant = () => {
   // App State
-  const [appMode, setAppMode] = useState('dashboard'); // dashboard, rfp-detail, knowledge-base
+  const [appMode, setAppMode] = useState('dashboard'); // dashboard, rfp-detail, knowledge-base, portal-explorer
   const [demoMode, setDemoMode] = useState(true);
   const [activeTab, setActiveTab] = useState('analyze');
   const [knowledgeTab, setKnowledgeTab] = useState('faq'); // faq, glossary, portals
@@ -2020,6 +2021,38 @@ const RFPWinningAssistant = () => {
     );
   };
 
+  // Handler für RFP Import aus Portal Explorer
+  const handleImportRFP = (rfp) => {
+    // RFP zu activeRFPs hinzufügen
+    const newRFP = {
+      ...rfp,
+      id: `imported-${Date.now()}`,
+      status: 'new',
+      winProbability: 65,
+      team: [],
+      documents: [],
+      activities: [
+        {
+          id: 1,
+          type: 'created',
+          message: `RFP aus ${rfp.portal} importiert`,
+          user: 'System',
+          date: new Date().toLocaleDateString('de-DE')
+        }
+      ],
+      comments: {},
+      currentPhase: 'screening'
+    };
+
+    setActiveRFPs(prev => [newRFP, ...prev]);
+
+    // Zurück zum Dashboard navigieren
+    setAppMode('dashboard');
+
+    // Notification erhöhen
+    setNotifications(prev => prev + 1);
+  };
+
   // Main App
   return (
     <div className="min-h-screen bg-gray-50">
@@ -2041,6 +2074,15 @@ const RFPWinningAssistant = () => {
                   }`}
                 >
                   Dashboard
+                </button>
+                <button
+                  onClick={() => setAppMode('portal-explorer')}
+                  className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-2 ${
+                    appMode === 'portal-explorer' ? 'bg-white/20' : 'hover:bg-white/10'
+                  }`}
+                >
+                  <Globe className="w-4 h-4" />
+                  Portal Explorer
                 </button>
                 <button
                   onClick={() => setAppMode('knowledge-base')}
@@ -2085,6 +2127,7 @@ const RFPWinningAssistant = () => {
       <div className="max-w-7xl mx-auto p-6">
         {appMode === 'dashboard' && <DashboardView />}
         {appMode === 'rfp-detail' && <RFPDetailView />}
+        {appMode === 'portal-explorer' && <PortalExplorer onImportRFP={handleImportRFP} />}
         {appMode === 'knowledge-base' && <KnowledgeBaseView />}
       </div>
 
