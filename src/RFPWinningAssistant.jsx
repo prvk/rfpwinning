@@ -85,6 +85,8 @@ import { getAllTemplates } from './data/templates';
 import PortalExplorer from './components/PortalExplorer';
 import { parsePDFFile, validateRFPData } from './utils/pdfParser';
 import { exportToWord, exportToPDF, exportToExcel } from './utils/exportEngine';
+import HybridTeam from './components/HybridTeam';
+import AIProposalGenerator from './components/AIProposalGenerator';
 
 const RFPWinningAssistant = () => {
   // App State
@@ -322,6 +324,28 @@ const RFPWinningAssistant = () => {
   ]);
 
   const [selectedRFP, setSelectedRFP] = useState(null);
+
+  // Handler for AI-generated content insertion
+  const handleInsertAIContent = (sectionName, content) => {
+    if (!selectedRFP) return;
+
+    const updatedSections = selectedRFP.proposalSections.map(section => {
+      if (section.name === sectionName) {
+        return {
+          ...section,
+          content: content,
+          status: 'review',
+          score: 80
+        };
+      }
+      return section;
+    });
+
+    setSelectedRFP({
+      ...selectedRFP,
+      proposalSections: updatedSections
+    });
+  };
 
   // Calculate Win Factors
   const calculateWinFactors = (rfp) => {
@@ -1027,7 +1051,7 @@ const RFPWinningAssistant = () => {
   };
 
   // Proposal Status with Comments
-  const ProposalStatus = ({ rfp }) => {
+  const ProposalStatus = ({ rfp, onInsertAIContent }) => {
     if (!rfp) return null;
 
     const overallScore = Math.round(
@@ -1074,6 +1098,14 @@ const RFPWinningAssistant = () => {
               </div>
 
               <p className="text-sm text-gray-600 mb-2">{section.content}</p>
+
+              {/* AI Proposal Generator Button */}
+              <div className="mt-3">
+                <AIProposalGenerator
+                  rfp={rfp}
+                  onInsertContent={(sectionName, content) => onInsertAIContent(sectionName, content)}
+                />
+              </div>
 
               {section.assignedTo && (
                 <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
@@ -2255,6 +2287,7 @@ const RFPWinningAssistant = () => {
               { id: 'analyze', label: 'Requirements', icon: <Target className="w-4 h-4" /> },
               { id: 'team', label: 'Team', icon: <Users className="w-4 h-4" /> },
               { id: 'compete', label: 'Competition', icon: <GitBranch className="w-4 h-4" /> },
+              { id: 'hybridteam', label: 'Hybrid Team', icon: <Users className="w-4 h-4" /> },
               { id: 'proposal', label: 'Proposal', icon: <FileText className="w-4 h-4" /> },
               { id: 'pricing', label: 'Pricing', icon: <DollarSign className="w-4 h-4" /> },
               { id: 'timeline', label: 'Timeline', icon: <Activity className="w-4 h-4" /> }
@@ -2281,7 +2314,8 @@ const RFPWinningAssistant = () => {
             {activeTab === 'analyze' && <RequirementsAnalysis rfp={selectedRFP} />}
             {activeTab === 'team' && <TeamAnalysis rfp={selectedRFP} />}
             {activeTab === 'compete' && <CompetitorAnalysis rfp={selectedRFP} />}
-            {activeTab === 'proposal' && <ProposalStatus rfp={selectedRFP} />}
+            {activeTab === 'hybridteam' && <HybridTeam />}
+            {activeTab === 'proposal' && <ProposalStatus rfp={selectedRFP} onInsertAIContent={handleInsertAIContent} />}
             {activeTab === 'pricing' && (
               <div className="bg-white p-6 rounded-lg shadow-sm border">
                 <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
