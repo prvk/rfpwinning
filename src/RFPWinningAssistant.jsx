@@ -87,6 +87,7 @@ import { parsePDFFile, validateRFPData } from './utils/pdfParser';
 import { exportToWord, exportToPDF, exportToExcel } from './utils/exportEngine';
 import HybridTeam from './components/HybridTeam';
 import AIProposalGenerator from './components/AIProposalGenerator';
+import NotificationPanel from './components/NotificationPanel';
 
 const RFPWinningAssistant = () => {
   // App State
@@ -120,7 +121,8 @@ const RFPWinningAssistant = () => {
   const [showDataPreview, setShowDataPreview] = useState(false);
 
   // Notification State
-  const [notifications, setNotifications] = useState(12);
+  const [showNotificationPanel, setShowNotificationPanel] = useState(false);
+  const [notificationsList, setNotificationsList] = useState([]);
 
   // Comments State (per RFP section)
   const [comments, setComments] = useState({});
@@ -317,50 +319,243 @@ const RFPWinningAssistant = () => {
   };
 
   // State Management
-  const [activeRFPs, setActiveRFPs] = useState([
-    demoRFPData[1],
-    demoRFPData[2],
-    demoRFPData[3]
-  ]);
+  const [activeRFPs, setActiveRFPs] = useState(() => {
+    // Load from localStorage on initial mount
+    try {
+      const savedRFPs = localStorage.getItem('rfpAssistant_activeRFPs');
+      if (savedRFPs) {
+        return JSON.parse(savedRFPs);
+      }
+    } catch (error) {
+      console.error('Error loading RFPs from localStorage:', error);
+    }
+    // Return demo data as fallback
+    return [demoRFPData[1], demoRFPData[2], demoRFPData[3]];
+  });
 
-  const [selectedRFP, setSelectedRFP] = useState(null);
+  const [selectedRFP, setSelectedRFP] = useState(() => {
+    try {
+      const savedSelectedId = localStorage.getItem('rfpAssistant_selectedRFPId');
+      if (savedSelectedId) {
+        const savedRFPs = localStorage.getItem('rfpAssistant_activeRFPs');
+        if (savedRFPs) {
+          const rfps = JSON.parse(savedRFPs);
+          return rfps.find(r => r.id === parseInt(savedSelectedId)) || null;
+        }
+      }
+    } catch (error) {
+      console.error('Error loading selected RFP from localStorage:', error);
+    }
+    return null;
+  });
+
+  // Save activeRFPs to localStorage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('rfpAssistant_activeRFPs', JSON.stringify(activeRFPs));
+    } catch (error) {
+      console.error('Error saving RFPs to localStorage:', error);
+    }
+  }, [activeRFPs]);
+
+  // Save selectedRFP ID to localStorage
+  useEffect(() => {
+    try {
+      if (selectedRFP) {
+        localStorage.setItem('rfpAssistant_selectedRFPId', selectedRFP.id.toString());
+      } else {
+        localStorage.removeItem('rfpAssistant_selectedRFPId');
+      }
+    } catch (error) {
+      console.error('Error saving selected RFP to localStorage:', error);
+    }
+  }, [selectedRFP]);
+
+  // Save user preferences
+  useEffect(() => {
+    try {
+      const preferences = {
+        viewMode,
+        sortBy,
+        filterStatus,
+        filterPortal,
+        budgetRange
+      };
+      localStorage.setItem('rfpAssistant_preferences', JSON.stringify(preferences));
+    } catch (error) {
+      console.error('Error saving preferences to localStorage:', error);
+    }
+  }, [viewMode, sortBy, filterStatus, filterPortal, budgetRange]);
+
+  // Load user preferences on mount
+  useEffect(() => {
+    try {
+      const savedPreferences = localStorage.getItem('rfpAssistant_preferences');
+      if (savedPreferences) {
+        const prefs = JSON.parse(savedPreferences);
+        if (prefs.viewMode) setViewMode(prefs.viewMode);
+        if (prefs.sortBy) setSortBy(prefs.sortBy);
+        if (prefs.filterStatus) setFilterStatus(prefs.filterStatus);
+        if (prefs.filterPortal) setFilterPortal(prefs.filterPortal);
+        if (prefs.budgetRange) setBudgetRange(prefs.budgetRange);
+      }
+    } catch (error) {
+      console.error('Error loading preferences from localStorage:', error);
+    }
+  }, []); // Only run once on mount
+
+  // Save notification read states
+  useEffect(() => {
+    try {
+      localStorage.setItem('rfpAssistant_notifications', JSON.stringify(notificationsList));
+    } catch (error) {
+      console.error('Error saving notifications to localStorage:', error);
+    }
+  }, [notificationsList]);
+
+  // Initialize notifications from all RFP activities
+  useEffect(() => {
+    // Try to load saved notifications first
+    try {
+      const savedNotifications = localStorage.getItem('rfpAssistant_notifications');
+      if (savedNotifications) {
+        setNotificationsList(JSON.parse(savedNotifications));
+        return; // Don't regenerate if we have saved ones
+      }
+    } catch (error) {
+      console.error('Error loading notifications from localStorage:', error);
+    }
+
+    // Generate from activities if no saved notifications
+    const allNotifications = [];
+    activeRFPs.forEach(rfp => {
+      if (rfp.activities) {
+        rfp.activities.forEach(activity => {
+          allNotifications.push({
+            id: `${rfp.id}-${activity.id}`,
+            type: activity.type,
+            rfpId: rfp.id,
+            rfpTitle: rfp.title,
+            message: activity.message,
+            user: activity.user,
+            timestamp: activity.date,
+            read: false,
+            actionUrl: null
+          });
+        });
+      }
+    });
+
+    // Sort by timestamp (newest first)
+    allNotifications.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    setNotificationsList(allNotifications);
+  }, []); // Only run once on mount
+
+  // Notification handlers
+  const handleMarkAsRead = (notificationIds) => {
+    setNotificationsList(prev =>
+      prev.map(notif =>
+        notificationIds.includes(notif.id) ? { ...notif, read: true } : notif
+      )
+    );
+  };
+
+  const handleClearAllNotifications = () => {
+    if (window.confirm('Clear all notifications?')) {
+      setNotificationsList([]);
+    }
+  };
+
+  const handleNotificationClick = (notification) => {
+    // Mark as read
+    handleMarkAsRead([notification.id]);
+
+    // Navigate to RFP if available
+    if (notification.rfpId) {
+      const rfp = activeRFPs.find(r => r.id === notification.rfpId);
+      if (rfp) {
+        setSelectedRFP(rfp);
+        setAppMode('rfp-detail');
+        setShowNotificationPanel(false);
+      }
+    }
+  };
+
+  const addNotification = (type, rfpId, message, user) => {
+    const rfp = activeRFPs.find(r => r.id === rfpId);
+    const newNotif = {
+      id: `${rfpId}-${Date.now()}`,
+      type,
+      rfpId,
+      rfpTitle: rfp?.title || 'Unknown RFP',
+      message,
+      user: user || 'System',
+      timestamp: new Date().toISOString(),
+      read: false,
+      actionUrl: null
+    };
+    setNotificationsList(prev => [newNotif, ...prev]);
+  };
 
   // Handler for AI-generated content insertion
   const handleInsertAIContent = (sectionName, content) => {
-    if (!selectedRFP) return;
-
-    const updatedSections = selectedRFP.proposalSections.map(section => {
-      if (section.name === sectionName) {
-        return {
-          ...section,
-          content: content,
-          status: 'review',
-          score: 80
-        };
+    try {
+      if (!selectedRFP) {
+        throw new Error('No RFP selected');
       }
-      return section;
-    });
 
-    setSelectedRFP({
-      ...selectedRFP,
-      proposalSections: updatedSections
-    });
+      if (!sectionName || !content) {
+        throw new Error('Section name and content are required');
+      }
+
+      const updatedSections = selectedRFP.proposalSections.map(section => {
+        if (section.name === sectionName) {
+          return {
+            ...section,
+            content: content,
+            status: 'review',
+            score: 80
+          };
+        }
+        return section;
+      });
+
+      const updatedRFP = {
+        ...selectedRFP,
+        proposalSections: updatedSections
+      };
+
+      setSelectedRFP(updatedRFP);
+
+      // Update in activeRFPs list
+      setActiveRFPs(prev =>
+        prev.map(rfp => rfp.id === updatedRFP.id ? updatedRFP : rfp)
+      );
+
+      // Add notification
+      addNotification('update', selectedRFP.id, `AI content inserted into "${sectionName}" section`, 'AI Assistant');
+    } catch (error) {
+      console.error('Error inserting AI content:', error);
+      alert('Failed to insert AI content: ' + error.message);
+    }
   };
 
   // Calculate Win Factors
   const calculateWinFactors = (rfp) => {
     if (!rfp) return {};
 
-    const mustHaves = rfp.requirements.filter(r => r.priority === 'must-have');
+    const mustHaves = rfp.requirements?.filter(r => r.priority === 'must-have') || [];
     const strongCapabilities = mustHaves.filter(r => r.ourCapability === 'strong' || r.ourCapability === 'medium');
     const requirementsFit = mustHaves.length > 0 ? (strongCapabilities.length / mustHaves.length) * 100 : 0;
 
-    const teamStrength = rfp.team.length >= 3 ?
+    const teamStrength = rfp.team?.length >= 3 ?
       rfp.team.reduce((acc, m) => acc + m.score, 0) / rfp.team.length : 30;
 
-    const proposalQuality = rfp.proposalSections.reduce((acc, s) => acc + s.score, 0) / rfp.proposalSections.length;
+    const proposalQuality = rfp.proposalSections?.length > 0 ?
+      rfp.proposalSections.reduce((acc, s) => acc + s.score, 0) / rfp.proposalSections.length : 0;
 
-    const avgCompetitorPrice = rfp.competitors.reduce((acc, c) => acc + c.estimatedPrice, 0) / rfp.competitors.length;
+    const avgCompetitorPrice = rfp.competitors?.length > 0 ?
+      rfp.competitors.reduce((acc, c) => acc + c.estimatedPrice, 0) / rfp.competitors.length : rfp.budget;
     const ourPrice = rfp.budget * 0.9;
     const priceCompetitiveness = ourPrice <= avgCompetitorPrice ? 70 : 50;
 
@@ -375,6 +570,68 @@ const RFPWinningAssistant = () => {
       localPresence: 50
     };
   };
+
+  // Calculate Win Probability from Win Factors
+  const calculateWinProbability = (winFactors) => {
+    // Weighted calculation
+    const weights = {
+      requirementsFit: 0.25,
+      priceCompetitiveness: 0.15,
+      teamStrength: 0.20,
+      proposalQuality: 0.25,
+      pastPerformance: 0.08,
+      differentiators: 0.04,
+      clientRelationship: 0.02,
+      localPresence: 0.01
+    };
+
+    let totalScore = 0;
+    Object.keys(weights).forEach(key => {
+      totalScore += (winFactors[key] || 0) * weights[key];
+    });
+
+    return Math.min(95, Math.max(5, Math.round(totalScore)));
+  };
+
+  // Auto-update win probability when RFP data changes
+  useEffect(() => {
+    if (selectedRFP) {
+      const winFactors = calculateWinFactors(selectedRFP);
+      const newWinProb = calculateWinProbability(winFactors);
+
+      // Only update if probability changed significantly (> 2%)
+      if (Math.abs(newWinProb - selectedRFP.winProbability) > 2) {
+        const updatedRFP = {
+          ...selectedRFP,
+          winProbability: newWinProb
+        };
+
+        // Update selected RFP
+        setSelectedRFP(updatedRFP);
+
+        // Update in activeRFPs list
+        setActiveRFPs(prev =>
+          prev.map(rfp => rfp.id === updatedRFP.id ? updatedRFP : rfp)
+        );
+
+        // Add notification about win probability change
+        const change = newWinProb - selectedRFP.winProbability;
+        const direction = change > 0 ? 'increased' : 'decreased';
+        addNotification(
+          'win-probability',
+          selectedRFP.id,
+          `Win probability ${direction} to ${newWinProb}% (${change > 0 ? '+' : ''}${change}%)`,
+          'AI Analysis'
+        );
+      }
+    }
+  }, [
+    selectedRFP?.proposalSections,
+    selectedRFP?.requirements,
+    selectedRFP?.team,
+    selectedRFP?.budget,
+    selectedRFP?.competitors
+  ]);
 
   // Filter and Sort RFPs
   const getFilteredAndSortedRFPs = () => {
@@ -478,44 +735,68 @@ const RFPWinningAssistant = () => {
 
   // Create RFP from extracted data
   const handleCreateRFPFromExtractedData = () => {
-    if (!extractedData) return;
+    if (!extractedData) {
+      alert('No extracted data available');
+      return;
+    }
 
-    // Transform extracted data to RFP format
-    const newRFP = {
-      id: Date.now(),
-      title: extractedData.title,
-      client: extractedData.client,
-      budget: extractedData.budget,
-      deadline: extractedData.deadline,
-      status: 'active',
-      phase: 'analysis',
-      winProbability: extractedData.validation.score,
-      requirements: extractedData.requirements.map((req, index) => ({
-        id: index + 1,
-        text: req.text,
-        category: req.category,
-        priority: req.priority,
-        ourCapability: 'medium'
-      })),
-      portal: 'Manual Upload',
-      type: 'Unknown',
-      tags: ['PDF Import'],
-      description: extractedData.rawText.substring(0, 300) + '...',
-      createdAt: new Date().toISOString().split('T')[0],
-      isDemo: false
-    };
+    try {
+      // Transform extracted data to RFP format
+      const newRFP = {
+        id: Date.now(),
+        title: extractedData.title || 'Untitled RFP',
+        client: extractedData.client || 'Unknown Client',
+        budget: extractedData.budget || 0,
+        deadline: extractedData.deadline || new Date().toISOString().split('T')[0],
+        status: 'active',
+        phase: 'analysis',
+        winProbability: extractedData.validation?.score || 50,
+        requirements: (extractedData.requirements || []).map((req, index) => ({
+          id: index + 1,
+          text: req.text || 'No description',
+          category: req.category || 'general',
+          priority: req.priority || 'medium',
+          ourCapability: 'medium'
+        })),
+        portal: 'Manual Upload',
+        type: 'Unknown',
+        tags: ['PDF Import'],
+        description: (extractedData.rawText || '').substring(0, 300) + '...',
+        createdAt: new Date().toISOString().split('T')[0],
+        isDemo: false,
+        team: [],
+        competitors: [],
+        proposalSections: [],
+        activities: [{
+          id: 1,
+          type: 'created',
+          user: 'System',
+          date: new Date().toISOString().split('T')[0],
+          message: 'RFP created from PDF upload'
+        }]
+      };
 
-    // TODO: Add RFP to state/database
-    console.log('Created RFP:', newRFP);
+      // Add RFP to state
+      setActiveRFPs(prev => [newRFP, ...prev]);
 
-    // Close modals and show success
-    setShowUploadModal(false);
-    setShowDataPreview(false);
-    setExtractedData(null);
-    setUploadedFile(null);
+      // Add notification
+      addNotification('created', newRFP.id, `New RFP created: ${newRFP.title}`, 'System');
 
-    // Show template selection modal
-    setShowTemplateModal(true);
+      // Close modals and show success
+      setShowUploadModal(false);
+      setShowDataPreview(false);
+      setExtractedData(null);
+      setUploadedFile(null);
+
+      // Navigate to the new RFP
+      setSelectedRFP(newRFP);
+      setAppMode('rfp-detail');
+
+      alert('RFP successfully created from PDF!');
+    } catch (error) {
+      console.error('Error creating RFP:', error);
+      alert('Failed to create RFP: ' + error.message);
+    }
   };
 
   // Export Functions
@@ -2287,7 +2568,6 @@ const RFPWinningAssistant = () => {
               { id: 'analyze', label: 'Requirements', icon: <Target className="w-4 h-4" /> },
               { id: 'team', label: 'Team', icon: <Users className="w-4 h-4" /> },
               { id: 'compete', label: 'Competition', icon: <GitBranch className="w-4 h-4" /> },
-              { id: 'hybridteam', label: 'Hybrid Team', icon: <Users className="w-4 h-4" /> },
               { id: 'proposal', label: 'Proposal', icon: <FileText className="w-4 h-4" /> },
               { id: 'pricing', label: 'Pricing', icon: <DollarSign className="w-4 h-4" /> },
               { id: 'timeline', label: 'Timeline', icon: <Activity className="w-4 h-4" /> }
@@ -2312,9 +2592,8 @@ const RFPWinningAssistant = () => {
         <div className="grid grid-cols-3 gap-6">
           <div className="col-span-2 space-y-6">
             {activeTab === 'analyze' && <RequirementsAnalysis rfp={selectedRFP} />}
-            {activeTab === 'team' && <TeamAnalysis rfp={selectedRFP} />}
+            {activeTab === 'team' && <HybridTeam />}
             {activeTab === 'compete' && <CompetitorAnalysis rfp={selectedRFP} />}
-            {activeTab === 'hybridteam' && <HybridTeam />}
             {activeTab === 'proposal' && <ProposalStatus rfp={selectedRFP} onInsertAIContent={handleInsertAIContent} />}
             {activeTab === 'pricing' && (
               <div className="bg-white p-6 rounded-lg shadow-sm border">
@@ -2373,34 +2652,51 @@ const RFPWinningAssistant = () => {
 
   // Handler für RFP Import aus Portal Explorer
   const handleImportRFP = (rfp) => {
-    // RFP zu activeRFPs hinzufügen
-    const newRFP = {
-      ...rfp,
-      id: `imported-${Date.now()}`,
-      status: 'new',
-      winProbability: 65,
-      team: [],
-      documents: [],
-      activities: [
-        {
-          id: 1,
-          type: 'created',
-          message: `RFP aus ${rfp.portal} importiert`,
-          user: 'System',
-          date: new Date().toLocaleDateString('de-DE')
-        }
-      ],
-      comments: {},
-      currentPhase: 'screening'
-    };
+    try {
+      if (!rfp) {
+        throw new Error('No RFP data provided');
+      }
 
-    setActiveRFPs(prev => [newRFP, ...prev]);
+      // RFP zu activeRFPs hinzufügen
+      const newRFP = {
+        ...rfp,
+        id: `imported-${Date.now()}`,
+        status: 'new',
+        winProbability: 65,
+        team: rfp.team || [],
+        documents: rfp.documents || [],
+        competitors: rfp.competitors || [],
+        proposalSections: rfp.proposalSections || [],
+        requirements: rfp.requirements || [],
+        activities: [
+          {
+            id: 1,
+            type: 'created',
+            message: `RFP aus ${rfp.portal || 'Portal'} importiert`,
+            user: 'System',
+            date: new Date().toISOString().split('T')[0]
+          }
+        ],
+        comments: {},
+        currentPhase: 'screening'
+      };
 
-    // Zurück zum Dashboard navigieren
-    setAppMode('dashboard');
+      setActiveRFPs(prev => [newRFP, ...prev]);
 
-    // Notification erhöhen
-    setNotifications(prev => prev + 1);
+      // Zurück zum Dashboard navigieren
+      setAppMode('dashboard');
+
+      // Add notification
+      addNotification('created', newRFP.id, `RFP aus ${rfp.portal || 'Portal'} importiert`, 'System');
+
+      // Show success message
+      setTimeout(() => {
+        alert(`RFP "${rfp.title || 'Untitled'}" successfully imported!`);
+      }, 100);
+    } catch (error) {
+      console.error('Error importing RFP:', error);
+      alert('Failed to import RFP: ' + error.message);
+    }
   };
 
   // Main App
@@ -2446,14 +2742,28 @@ const RFPWinningAssistant = () => {
             </div>
 
             <div className="flex items-center gap-4">
-              <button className="relative p-2 hover:bg-white/10 rounded-lg">
-                <Bell className="w-5 h-5" />
-                {notifications > 0 && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center">
-                    {notifications}
-                  </span>
-                )}
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setShowNotificationPanel(!showNotificationPanel)}
+                  className="relative p-2 hover:bg-white/10 rounded-lg"
+                >
+                  <Bell className="w-5 h-5" />
+                  {notificationsList.filter(n => !n.read).length > 0 && (
+                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center">
+                      {notificationsList.filter(n => !n.read).length}
+                    </span>
+                  )}
+                </button>
+
+                <NotificationPanel
+                  notifications={notificationsList}
+                  onMarkAsRead={handleMarkAsRead}
+                  onClearAll={handleClearAllNotifications}
+                  onNotificationClick={handleNotificationClick}
+                  isOpen={showNotificationPanel}
+                  onClose={() => setShowNotificationPanel(false)}
+                />
+              </div>
 
               <div className="flex items-center gap-2 bg-white/20 px-3 py-1.5 rounded-lg">
                 <span className="text-sm">Demo Mode</span>
