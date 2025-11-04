@@ -88,10 +88,11 @@ import { exportToWord, exportToPDF, exportToExcel } from './utils/exportEngine';
 import HybridTeam from './components/HybridTeam';
 import AIProposalGenerator from './components/AIProposalGenerator';
 import NotificationPanel from './components/NotificationPanel';
+import FeaturesGuide from './components/FeaturesGuide';
 
 const RFPWinningAssistant = () => {
   // App State
-  const [appMode, setAppMode] = useState('dashboard'); // dashboard, rfp-detail, knowledge-base, portal-explorer
+  const [appMode, setAppMode] = useState('dashboard'); // dashboard, rfp-detail, knowledge-base, portal-explorer, features-guide
   const [demoMode, setDemoMode] = useState(true);
   const [activeTab, setActiveTab] = useState('analyze');
   const [knowledgeTab, setKnowledgeTab] = useState('faq'); // faq, glossary, portals
@@ -2738,6 +2739,14 @@ const RFPWinningAssistant = () => {
                 >
                   Knowledge Base
                 </button>
+                <button
+                  onClick={() => setAppMode('features-guide')}
+                  className={`px-3 py-1.5 rounded-lg transition-colors ${
+                    appMode === 'features-guide' ? 'bg-white/20' : 'hover:bg-white/10'
+                  }`}
+                >
+                  Features Guide
+                </button>
               </nav>
             </div>
 
@@ -2789,6 +2798,7 @@ const RFPWinningAssistant = () => {
         {appMode === 'rfp-detail' && <RFPDetailView />}
         {appMode === 'portal-explorer' && <PortalExplorer onImportRFP={handleImportRFP} />}
         {appMode === 'knowledge-base' && <KnowledgeBaseView />}
+        {appMode === 'features-guide' && <FeaturesGuide />}
       </div>
 
       {/* Modals */}
