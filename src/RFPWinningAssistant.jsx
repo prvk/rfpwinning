@@ -83,6 +83,8 @@ import {
 import { faqData, glossaryData, portalDirectoryData } from './data/knowledgeBase';
 import { getAllTemplates } from './data/templates';
 import PortalExplorer from './components/PortalExplorer';
+import { parsePDFFile, validateRFPData } from './utils/pdfParser';
+import { exportToWord, exportToPDF, exportToExcel } from './utils/exportEngine';
 
 const RFPWinningAssistant = () => {
   // App State
@@ -103,6 +105,7 @@ const RFPWinningAssistant = () => {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
   const [showTemplateDetailsModal, setShowTemplateDetailsModal] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
 
@@ -110,6 +113,9 @@ const RFPWinningAssistant = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadedFile, setUploadedFile] = useState(null);
+  const [extractedData, setExtractedData] = useState(null);
+  const [parsingError, setParsingError] = useState(null);
+  const [showDataPreview, setShowDataPreview] = useState(false);
 
   // Notification State
   const [notifications, setNotifications] = useState(12);
@@ -390,32 +396,203 @@ const RFPWinningAssistant = () => {
     return filtered;
   };
 
-  // File Upload Simulation
-  const handleFileUpload = (file) => {
+  // File Upload with Real PDF Parsing
+  const handleFileUpload = async (file) => {
+    if (!file) return;
+
+    // Validate file type
+    if (!file.name.endsWith('.pdf')) {
+      setParsingError('Bitte laden Sie eine PDF-Datei hoch.');
+      return;
+    }
+
+    // Reset states
     setUploadedFile(file);
     setIsUploading(true);
     setUploadProgress(0);
+    setParsingError(null);
+    setExtractedData(null);
+    setShowDataPreview(false);
 
-    const interval = setInterval(() => {
-      setUploadProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setIsUploading(false);
-          setTimeout(() => {
-            setShowUploadModal(false);
-            setShowTemplateModal(true);
-          }, 500);
-          return 100;
-        }
-        return prev + 10;
+    try {
+      // Start upload progress
+      setUploadProgress(20);
+
+      // Parse PDF file
+      setUploadProgress(40);
+      const rfpData = await parsePDFFile(file);
+
+      setUploadProgress(70);
+
+      // Validate extracted data
+      const validation = validateRFPData(rfpData);
+
+      setUploadProgress(90);
+
+      // Store extracted data
+      setExtractedData({
+        ...rfpData,
+        validation: validation,
+        fileName: file.name
       });
-    }, 200);
+
+      setUploadProgress(100);
+
+      // Show data preview
+      setTimeout(() => {
+        setShowDataPreview(true);
+        setIsUploading(false);
+      }, 300);
+
+    } catch (error) {
+      console.error('PDF Parsing Error:', error);
+      setParsingError(error.message || 'Fehler beim Parsen der PDF-Datei');
+      setIsUploading(false);
+      setUploadProgress(0);
+    }
   };
 
-  // Export Simulation
-  const handleExport = (format) => {
-    alert(`Exporting to ${format}... (Demo mode - no actual file generated)`);
-    setShowExportModal(false);
+  // Create RFP from extracted data
+  const handleCreateRFPFromExtractedData = () => {
+    if (!extractedData) return;
+
+    // Transform extracted data to RFP format
+    const newRFP = {
+      id: Date.now(),
+      title: extractedData.title,
+      client: extractedData.client,
+      budget: extractedData.budget,
+      deadline: extractedData.deadline,
+      status: 'active',
+      phase: 'analysis',
+      winProbability: extractedData.validation.score,
+      requirements: extractedData.requirements.map((req, index) => ({
+        id: index + 1,
+        text: req.text,
+        category: req.category,
+        priority: req.priority,
+        ourCapability: 'medium'
+      })),
+      portal: 'Manual Upload',
+      type: 'Unknown',
+      tags: ['PDF Import'],
+      description: extractedData.rawText.substring(0, 300) + '...',
+      createdAt: new Date().toISOString().split('T')[0],
+      isDemo: false
+    };
+
+    // TODO: Add RFP to state/database
+    console.log('Created RFP:', newRFP);
+
+    // Close modals and show success
+    setShowUploadModal(false);
+    setShowDataPreview(false);
+    setExtractedData(null);
+    setUploadedFile(null);
+
+    // Show template selection modal
+    setShowTemplateModal(true);
+  };
+
+  // Export Functions
+  const handleExport = async (format) => {
+    if (!selectedRFP) {
+      alert('No RFP selected for export');
+      return;
+    }
+
+    setExportLoading(true);
+
+    try {
+      let result;
+
+      switch (format.toLowerCase()) {
+        case 'word':
+          result = await exportToWord(selectedRFP);
+          break;
+        case 'pdf':
+          result = await exportToPDF(selectedRFP);
+          break;
+        case 'excel':
+        case 'csv':
+          result = await exportToExcel(selectedRFP);
+          break;
+        default:
+          throw new Error(`Unsupported format: ${format}`);
+      }
+
+      if (result.success) {
+        setShowExportModal(false);
+        // Show success notification
+        setTimeout(() => {
+          alert(`Successfully exported: ${result.filename}\nSize: ${result.size}\nFormat: ${result.format}`);
+        }, 100);
+      } else {
+        throw new Error(result.error || 'Export failed');
+      }
+
+    } catch (error) {
+      console.error('Export error:', error);
+      alert(`Export failed: ${error.message}`);
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  // Use Template - Create Real RFP
+  const handleUseTemplate = (template) => {
+    const newRFP = {
+      id: Date.now(),
+      title: `New ${template.name} Project`,
+      client: '',
+      portal: 'Direct',
+      type: 'Private',
+      budget: template.budgetRange.min,
+      deadline: new Date(Date.now() + 90*24*60*60*1000).toISOString().split('T')[0],
+      submissionDeadline: new Date(Date.now() + 83*24*60*60*1000).toISOString().split('T')[0],
+      status: 'draft',
+      winProbability: 50,
+      phase: 'requirements',
+      isDemo: false,
+      tags: [template.name],
+      description: template.description,
+      createdAt: new Date().toISOString().split('T')[0],
+
+      // From template:
+      requirements: template.requirements.map((req, i) => ({
+        id: i + 1,
+        text: req.text,
+        category: req.category,
+        priority: req.priority,
+        ourCapability: 'medium'
+      })),
+
+      scoringCriteria: template.scoringCriteria.map((criteria, i) => ({
+        id: i + 1,
+        name: criteria.name,
+        weight: criteria.weight,
+        description: criteria.description
+      })),
+
+      team: [],
+      competitors: [],
+      proposalSections: [
+        { id: 1, name: 'Executive Summary', status: 'todo', score: 0 },
+        { id: 2, name: 'Technical Approach', status: 'todo', score: 0 },
+        { id: 3, name: 'Team & Experience', status: 'todo', score: 0 },
+        { id: 4, name: 'Pricing', status: 'todo', score: 0 },
+        { id: 5, name: 'Timeline', status: 'todo', score: 0 }
+      ],
+      activities: [],
+      notes: `Created from ${template.name} template`,
+      documents: []
+    };
+
+    setActiveRFPs([...activeRFPs, newRFP]);
+    setSelectedRFP(newRFP);
+    setAppMode('rfp-detail');
+    setShowTemplateDetailsModal(false);
+    setShowTemplateModal(false);
   };
 
   // Add Comment
@@ -1072,14 +1249,19 @@ const RFPWinningAssistant = () => {
 
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-lg max-w-2xl w-full p-6">
+        <div className="bg-white rounded-lg max-w-4xl w-full p-6 max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-bold flex items-center gap-2">
               <Upload className="w-6 h-6" />
               Upload RFP Document
             </h2>
             <button
-              onClick={() => setShowUploadModal(false)}
+              onClick={() => {
+                setShowUploadModal(false);
+                setExtractedData(null);
+                setShowDataPreview(false);
+                setParsingError(null);
+              }}
               className="p-1 hover:bg-gray-100 rounded"
             >
               <X className="w-5 h-5" />
@@ -1087,25 +1269,53 @@ const RFPWinningAssistant = () => {
           </div>
 
           <div className="space-y-4">
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-              <FileUp className="w-12 h-12 mx-auto text-gray-400 mb-3" />
-              <p className="text-gray-600 mb-2">Drag and drop your RFP document here</p>
-              <p className="text-sm text-gray-500 mb-4">Supported formats: PDF, DOC, DOCX, ZIP</p>
-              <label className="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer">
-                <input
-                  type="file"
-                  className="hidden"
-                  accept=".pdf,.doc,.docx,.zip"
-                  onChange={(e) => handleFileUpload(e.target.files[0])}
-                />
-                Browse Files
-              </label>
-            </div>
+            {!showDataPreview && !parsingError && (
+              <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+                <FileUp className="w-12 h-12 mx-auto text-gray-400 mb-3" />
+                <p className="text-gray-600 mb-2">Drag and drop your RFP document here</p>
+                <p className="text-sm text-gray-500 mb-4">Supported format: PDF only</p>
+                <label className="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer">
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept=".pdf"
+                    onChange={(e) => handleFileUpload(e.target.files[0])}
+                  />
+                  Browse Files
+                </label>
+              </div>
+            )}
+
+            {parsingError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="font-semibold text-red-900 mb-1">Parsing Error</h3>
+                    <p className="text-sm text-red-700">{parsingError}</p>
+                    <button
+                      onClick={() => {
+                        setParsingError(null);
+                        setUploadedFile(null);
+                      }}
+                      className="mt-3 text-sm text-red-600 hover:text-red-800 font-medium"
+                    >
+                      Try Again
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {isUploading && (
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium">Uploading and parsing...</span>
+                  <span className="text-sm font-medium">
+                    {uploadProgress < 40 ? 'Uploading PDF...' :
+                     uploadProgress < 70 ? 'Parsing document...' :
+                     uploadProgress < 90 ? 'Extracting data...' :
+                     'Finalizing...'}
+                  </span>
                   <span className="text-sm text-gray-600">{uploadProgress}%</span>
                 </div>
                 <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
@@ -1115,8 +1325,109 @@ const RFPWinningAssistant = () => {
                   />
                 </div>
                 <p className="text-xs text-gray-500 mt-2">
-                  AI is extracting requirements, deadlines, and key information...
+                  AI is extracting requirements, deadlines, budget, and key information...
                 </p>
+              </div>
+            )}
+
+            {showDataPreview && extractedData && (
+              <div className="space-y-4">
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <CheckCircle2 className="w-5 h-5 text-green-600" />
+                    <h3 className="font-semibold text-green-900">PDF Successfully Parsed!</h3>
+                  </div>
+                  <p className="text-sm text-green-700">
+                    Completeness: {extractedData.validation.score}%
+                    {extractedData.validation.score < 50 && ' - Some information may be missing'}
+                  </p>
+                </div>
+
+                <div className="border rounded-lg p-4 space-y-4">
+                  <div>
+                    <h3 className="font-semibold text-sm text-gray-700 mb-2">Extracted Information</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs text-gray-500">Project Title</label>
+                        <p className="font-medium">{extractedData.title}</p>
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-500">Client</label>
+                        <p className="font-medium">{extractedData.client}</p>
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-500">Budget</label>
+                        <p className="font-medium">
+                          {extractedData.budget ?
+                            `€${extractedData.budget.toLocaleString('de-DE')}` :
+                            'Not found'}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-500">Deadline</label>
+                        <p className="font-medium">
+                          {extractedData.deadline || 'Not found'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-gray-500 mb-2 block">
+                      Requirements Found: {extractedData.requirements.length}
+                    </label>
+                    <div className="max-h-60 overflow-y-auto space-y-2">
+                      {extractedData.requirements.slice(0, 10).map((req, idx) => (
+                        <div key={idx} className="flex items-start gap-2 text-sm bg-gray-50 p-2 rounded">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            req.priority === 'must-have' ? 'bg-red-100 text-red-700' :
+                            req.priority === 'should-have' ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-blue-100 text-blue-700'
+                          }`}>
+                            {req.priority}
+                          </span>
+                          <span className="flex-1">{req.text}</span>
+                        </div>
+                      ))}
+                      {extractedData.requirements.length > 10 && (
+                        <p className="text-xs text-gray-500 text-center">
+                          +{extractedData.requirements.length - 10} more requirements
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {extractedData.validation.warnings.length > 0 && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded p-3">
+                      <h4 className="text-sm font-semibold text-yellow-900 mb-1">Warnings</h4>
+                      <ul className="text-xs text-yellow-700 list-disc list-inside">
+                        {extractedData.validation.warnings.map((warning, idx) => (
+                          <li key={idx}>{warning}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleCreateRFPFromExtractedData}
+                    className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle2 className="w-5 h-5" />
+                    Confirm & Create RFP
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowDataPreview(false);
+                      setExtractedData(null);
+                      setUploadedFile(null);
+                    }}
+                    className="px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
+                    Upload Different File
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -1272,11 +1583,7 @@ const RFPWinningAssistant = () => {
 
           <div className="mt-6 flex gap-3">
             <button
-              onClick={() => {
-                alert('Template applied! (Demo mode - would create new RFP with template data)');
-                setShowTemplateDetailsModal(false);
-                setShowTemplateModal(false);
-              }}
+              onClick={() => handleUseTemplate(selectedTemplate)}
               className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
             >
               Use This Template
@@ -1315,24 +1622,33 @@ const RFPWinningAssistant = () => {
             <button
               onClick={() => setShowExportModal(false)}
               className="p-1 hover:bg-gray-100 rounded"
+              disabled={exportLoading}
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            {exportOptions.map(option => (
-              <button
-                key={option.format}
-                onClick={() => handleExport(option.format)}
-                className={`p-4 border-2 rounded-lg hover:border-${option.color}-500 hover:bg-${option.color}-50 transition-all text-left`}
-              >
-                <div className={`text-${option.color}-600 mb-2`}>{option.icon}</div>
-                <h3 className="font-semibold mb-1">{option.format}</h3>
-                <p className="text-sm text-gray-600">{option.desc}</p>
-              </button>
-            ))}
-          </div>
+          {exportLoading ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <RefreshCw className="w-12 h-12 text-blue-600 animate-spin mb-4" />
+              <p className="text-lg font-semibold text-gray-700">Generating export...</p>
+              <p className="text-sm text-gray-500 mt-2">This may take a few moments</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              {exportOptions.map(option => (
+                <button
+                  key={option.format}
+                  onClick={() => handleExport(option.format)}
+                  className={`p-4 border-2 rounded-lg hover:border-${option.color}-500 hover:bg-${option.color}-50 transition-all text-left`}
+                >
+                  <div className={`text-${option.color}-600 mb-2`}>{option.icon}</div>
+                  <h3 className="font-semibold mb-1">{option.format}</h3>
+                  <p className="text-sm text-gray-600">{option.desc}</p>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     );
